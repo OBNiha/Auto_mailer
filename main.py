@@ -31,7 +31,7 @@ def get_driver():
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    return uc.Chrome(headless=False, options=options)
+    return uc.Chrome(headless=True, options=options)
 
 # Load saved cookies to avoid login
 def load_cookies(driver, url):
