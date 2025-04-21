@@ -25,7 +25,7 @@ LOOKER_PAGES = [
     "https://lookerstudio.google.com/reporting/"
     "bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_c7fyt0w5qd",
 ]
-RECIPIENTS = "niha.singhania@flipkart.com"
+RECIPIENTS = ["niha.singhania@flipkart.com"]
 SENDER = "niha.singhania@flipkart.com" # Workspace mailbox you’ll send as
 SA_FILE = "sa.json" # Written by the workflow step
 COOKIE_FILE = "cookies.pkl" # Re‑used between runs
