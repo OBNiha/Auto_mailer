@@ -60,9 +60,9 @@ def capture_screens():
     return paths
 
 def send_mail(paths):
-    smtp_user = os.getenv("SMTP_USERNAME")
-    smtp_pass = os.getenv("SMTP_PASSWORD")
-
+    smtp_user = "niha.singhania@flipkart.com"
+    smtp_pass = "vadk lmsp zfpw zxab"
+    
     ist_now = datetime.datetime.utcnow().replace(
         tzinfo=pytz.utc).astimezone(TIMEZONE)
     subject = f"📊 OB Summary Report – {ist_now:%Y-%m-%d %H:%M IST}"
