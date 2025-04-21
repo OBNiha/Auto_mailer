@@ -80,7 +80,7 @@ def capture_screens():
 # Email the screenshots
 def send_mail(paths):
     smtp_user = "niha.singhania@flipkart.com"
-    smtp_pass = "vadk lmsp zfpw zxab"
+    smtp_pass = "xckn wjbm jzol riba"
 
     ist_now = datetime.datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(TIMEZONE)
     subject = f"📊 OB Summary Report – {ist_now:%Y-%m-%d %H:%M IST}"
