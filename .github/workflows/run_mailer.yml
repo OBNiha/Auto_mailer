@@ -1,41 +1,44 @@
-name: Auto Mailer
+name: Daily OB Summary Email
 
 on:
   schedule:
-    - cron: '30 3-14 * * *' # Every hour from 09:30 to 20:30 IST
-  workflow_dispatch: # Manual trigger option
+    - cron: '45 0 * * *' # Runs daily at 05:15 AM IST (UTC+5:30)
+  workflow_dispatch: # Allows manual run from GitHub UI
 
 jobs:
-  mailer:
+  run-screenshot-mailer:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: Install Chrome and Chromedriver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget unzip
+          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -f install -y
+          CHROME_VERSION=$(google-chrome --version | grep -oP "\d+\.\d+\.\d+")
+          CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE")
+          wget https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip
+          unzip chromedriver_linux64.zip
+          sudo mv chromedriver /usr/bin/chromedriver
+          sudo chmod +x /usr/bin/chromedriver
 
-    - name: Install Chrome & Chromedriver
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y wget unzip google-chrome-stable
-        CHROME_VERSION=$(google-chrome-stable --version | grep -oP '\d+\.\d+\.\d+\.\d+')
-        wget -q https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chromedriver-linux64.zip -O /tmp/chromedriver.zip
-        unzip -o /tmp/chromedriver.zip -d /tmp
-        sudo mv /tmp/chromedriver-linux64/chromedriver /usr/bin/chromedriver
-        sudo chmod +x /usr/bin/chromedriver
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Run Screenshot Email Script
-      env:
-        SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-        SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-      run: python main.py
+      - name: Run screenshot mailer script
+        run: python main.py
+
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
