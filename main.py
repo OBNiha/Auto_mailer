@@ -1,39 +1,27 @@
-#!/usr/bin/env python3
-"""
-Take two Looker Studio screenshots with headless Chrome,
-e‑mail them via Gmail API using a GCP service‑account,
-then exit (for GitHub Actions).
-"""
-
-import os, time, datetime, pickle, base64, traceback
-from email.message import EmailMessage
-
+import os
+import time
+import datetime
 import pytz
+import pickle
+import traceback
+from email.message import EmailMessage
+import smtplib
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-
-
-# ── CONFIG ──────────────────────────────────────────────────────────────────── #
-
 LOOKER_PAGES = [
-    "https://lookerstudio.google.com/reporting/"
-    "bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_fsj6ky8zqd",
-    "https://lookerstudio.google.com/reporting/"
-    "bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_c7fyt0w5qd",
+    "https://lookerstudio.google.com/reporting/bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_fsj6ky8zqd",
+    "https://lookerstudio.google.com/reporting/bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_c7fyt0w5qd",
 ]
-RECIPIENTS = ["niha.singhania@flipkart.com"]
-SENDER = "niha.singhania@flipkart.com" # Workspace mailbox you’ll send as
-SA_FILE = "sa.json" # Written by the workflow step
-COOKIE_FILE = "cookies.pkl" # Re‑used between runs
+
+RECIPIENTS = "niha.singhania@flipkart.com",
+  
+
+COOKIE_FILE = "cookies.pkl"
 TIMEZONE = pytz.timezone("Asia/Kolkata")
 
-# ── BROWSER HELPERS ─────────────────────────────────────────────────────────── #
-
-def get_driver() -> webdriver.Chrome:
+def get_driver():
     opts = Options()
     opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
@@ -41,84 +29,64 @@ def get_driver() -> webdriver.Chrome:
     opts.add_argument("--window-size=1920,1080")
     return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=opts)
 
-
-def load_cookies(driver, url: str):
+def load_cookies(driver, url):
     if not os.path.exists(COOKIE_FILE):
         return
     with open(COOKIE_FILE, "rb") as f:
         cookies = pickle.load(f)
     driver.get(url)
     time.sleep(5)
-    for c in cookies:
-        driver.add_cookie(c)
+    for cookie in cookies:
+        driver.add_cookie(cookie)
     driver.refresh()
-
 
 def save_cookies(driver):
     with open(COOKIE_FILE, "wb") as f:
         pickle.dump(driver.get_cookies(), f)
 
-# ── CORE FUNCTIONS ─────────────────────────────────────────────────────────── #
-
-def capture_screens() -> list[str]:
+def capture_screens():
     driver = get_driver()
     paths = []
     for i, url in enumerate(LOOKER_PAGES, 1):
+        print(f"⏳ Loading: {url}")
         load_cookies(driver, url)
-        print(f"⏳ Loading {url}")
-        time.sleep(25) # allow charts to render
-        path = f"screenshot_{i}.png"
-        driver.save_screenshot(path)
-        print(f"✅ Saved {path}")
-        paths.append(path)
+        time.sleep(25)
+        filename = f"screenshot_{i}.png"
+        driver.save_screenshot(filename)
+        print(f"✅ Saved: {filename}")
+        paths.append(filename)
     save_cookies(driver)
     driver.quit()
     return paths
 
+def send_mail(paths):
+    smtp_user = os.getenv("SMTP_USERNAME")
+    smtp_pass = os.getenv("SMTP_PASSWORD")
 
-def gmail_service() -> build:
-    creds = (
-        service_account.Credentials.from_service_account_file(
-            SA_FILE,
-            scopes=["https://www.googleapis.com/auth/gmail.send"],
-        )
-        .with_subject(SENDER)
-    )
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
-
-
-def send_mail(paths: list[str]):
-    ist_now = datetime.datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(TIMEZONE)
+    ist_now = datetime.datetime.utcnow().replace(
+        tzinfo=pytz.utc).astimezone(TIMEZONE)
     subject = f"📊 OB Summary Report – {ist_now:%Y-%m-%d %H:%M IST}"
 
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = SENDER
+    msg["From"] = smtp_user
     msg["To"] = ", ".join(RECIPIENTS)
-    msg.set_content(
-        "Hi team,\n\nPlease find the latest PAN‑India summary screenshots attached.\n\n— Onboarding Bot"
-    )
+    msg.set_content("Hi team,\n\nPlease find attached the latest PAN India summary screenshots.\n\n– Onboarding Bot")
 
-    for p in paths:
-        with open(p, "rb") as f:
-            msg.add_attachment(
-                f.read(),
-                maintype="image",
-                subtype="png",
-                filename=os.path.basename(p),
-            )
+    for path in paths:
+        with open(path, "rb") as f:
+            msg.add_attachment(f.read(), maintype="image", subtype="png", filename=path)
 
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-    gmail_service().users().messages().send(userId="me", body={"raw": raw}).execute()
-    print("📧 Mail sent via Gmail API")
-
-
-# ── MAIN ───────────────────────────────────────────────────────────────────── #
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        print("✅ Email sent successfully!")
+    except Exception as e:
+        print(f"❌ Email failed: {e}")
+        traceback.print_exc()
 
 if __name__ == "__main__":
-    try:
-        imgs = capture_screens()
-        send_mail(imgs)
-    except Exception:
-        traceback.print_exc()
-        raise
+    screenshots = capture_screens()
+    send_mail(screenshots)
