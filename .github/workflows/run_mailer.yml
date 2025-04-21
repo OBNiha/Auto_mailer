@@ -2,9 +2,8 @@ name: Auto Mailer
 
 on:
   schedule:
-    # 09:30–20:30 IST, hourly
-    - cron: '30 3-14 * * *'
-  workflow_dispatch: # manual trigger
+    - cron: '30 3-14 * * *' # Every hour from 09:30 to 20:30 IST
+  workflow_dispatch: # Manual trigger option
 
 jobs:
   mailer:
@@ -12,18 +11,20 @@ jobs:
     timeout-minutes: 15
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-    - uses: actions/setup-python@v5
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    - name: Install Python deps
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Install Chrome + chromedriver
+    - name: Install Chrome & Chromedriver
       run: |
         sudo apt-get update
         sudo apt-get install -y wget unzip google-chrome-stable
@@ -33,18 +34,8 @@ jobs:
         sudo mv /tmp/chromedriver-linux64/chromedriver /usr/bin/chromedriver
         sudo chmod +x /usr/bin/chromedriver
 
-    - name: Write service‑account key
+    - name: Run Screenshot Email Script
       env:
-        GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-      run: |
-        echo "$GCP_SA_KEY" | grep -q '"type": "service_account"' || \
-          (echo "Secret GCP_SA_KEY missing or base64‑encode it!" && exit 1)
-        # decode if base64 or just write raw JSON
-        if echo "$GCP_SA_KEY" | grep -q '^{'; then
-          echo "$GCP_SA_KEY" > sa.json
-        else
-          echo "$GCP_SA_KEY" | base64 -d > sa.json
-        fi
-
-    - name: Run mailer
+        SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+        SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
       run: python main.py
