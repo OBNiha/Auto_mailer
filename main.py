@@ -1,140 +1,127 @@
+"""
+main.py – grab two Looker Studio pages, e‑mail screenshots, exit.
+Runs inside GitHub Actions; Chrome + chromedriver are pre‑installed.
+"""
+
 import time
-import smtplib
-import traceback
-import pickle
-import os
 import datetime
-import subprocess
-import tempfile
 import pytz
+import pickle
+import traceback
+import os
 from email.message import EmailMessage
+import smtplib
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 
-def setup_driver():
-    print("🔄 Setting up Chrome WebDriver...")
-    os.system("pkill -9 chrome")
-    os.system("pkill -9 chromedriver")
+# List of Looker Studio pages to capture screenshots from
+LOOKER_PAGES = [
+    "https://lookerstudio.google.com/reporting/bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_fsj6ky8zqd",
+    "https://lookerstudio.google.com/reporting/bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_c7fyt0w5qd",
+]
 
-    os.system("sudo apt-get update")
-    os.system("sudo apt-get install -y google-chrome-stable")
+# File to store cookies for session management
+COOKIE_FILE = "cookies.pkl"
 
-    chrome_version = subprocess.check_output("google-chrome-stable --version", shell=True).decode("utf-8").strip().split(" ")[2]
-    chromedriver_url = f"https://storage.googleapis.com/chrome-for-testing-public/{chrome_version}/linux64/chromedriver-linux64.zip"
 
-    os.system(f"wget -q {chromedriver_url} -O chromedriver.zip")
-    os.system("unzip -o chromedriver.zip")
-    os.system("mv chromedriver-linux64/chromedriver /usr/bin/chromedriver")
-    os.system("chmod +x /usr/bin/chromedriver")
+def get_driver() -> webdriver.Chrome:
+    """
+    Initializes and returns a headless Chrome WebDriver with the necessary options.
+    """
+    opts = Options()
+    opts.add_argument("--headless=new")  # Run headless (no UI)
+    opts.add_argument("--no-sandbox")    # Disables the sandbox for the Chromium process
+    opts.add_argument("--disable-dev-shm-usage")  # Avoids limited memory usage errors
+    opts.add_argument("--window-size=1920,1080")  # Sets window size to capture full page
+    return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=opts)
 
-    temp_dir = tempfile.mkdtemp()
-    chrome_options = Options()
-    chrome_options.add_argument(f"--user-data-dir={temp_dir}")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--window-size=1920,1080")
-
-    service = Service("/usr/bin/chromedriver")
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    print("✅ ChromeDriver is ready!")
-    return driver
-
-def save_cookies(driver):
-    cookies = driver.get_cookies()
-    with open("cookies.pkl", "wb") as file:
-        pickle.dump(cookies, file)
-    print("✅ Cookies saved.")
 
 def load_cookies(driver, url):
+    """
+    Loads cookies from a pickle file to maintain session across script runs.
+    If cookies are not found, it will print a message and let the user log in manually.
+    """
     try:
-        with open("cookies.pkl", "rb") as file:
-            cookies = pickle.load(file)
+        with open(COOKIE_FILE, "rb") as f:
+            cookies = pickle.load(f)
         driver.get(url)
-        time.sleep(15)
-        for cookie in cookies:
-            driver.add_cookie(cookie)
-        print("✅ Cookies loaded successfully.")
+        time.sleep(5)  # Allow time for the page to load
+        for c in cookies:
+            driver.add_cookie(c)
+        driver.refresh()
     except FileNotFoundError:
-        print("⚠️ No cookies found. Manual login required.")
+        print("No cookies.pkl – first run will require manual login and saving.")
 
-def capture_screenshots():
-    driver = setup_driver()
-    dashboard_urls = [
-        "https://lookerstudio.google.com/reporting/bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_fsj6ky8zqd",
-        "https://lookerstudio.google.com/reporting/bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_c7fyt0w5qd"  # Replace with second dashboard URL
-    ]
 
-    screenshot_paths = []
-    for i, url in enumerate(dashboard_urls):
-        driver.get(url)
-        print(f"⏳ Waiting for the page to load: {url}")
-        time.sleep(30)  # Wait for the page to load initially
-        load_cookies(driver, url)
+def save_cookies(driver):
+    """
+    Saves the current cookies to a file for future session use.
+    """
+    with open(COOKIE_FILE, "wb") as f:
+        pickle.dump(driver.get_cookies(), f)
 
-        print("🔄 Refreshing page to load updated data...")
-        driver.refresh()  # Refresh page after applying cookies
-        time.sleep(30)  # Wait after refresh to ensure new data loads
 
-        screenshot_path = f"dashboard_screenshot_{i+1}.png"
-        driver.save_screenshot(screenshot_path)
-        print(f"📸 Screenshot saved: {screenshot_path}")
-        screenshot_paths.append(screenshot_path)
+def capture():
+    """
+    Captures screenshots of the Looker Studio pages and returns a list of file paths.
+    """
+    driver = get_driver()  # Initialize the WebDriver
+    paths = []
+    for i, url in enumerate(LOOKER_PAGES, 1):
+        load_cookies(driver, url)  # Load cookies for maintaining session
+        print(f"⏳ loading {url}")
+        time.sleep(25)  # Let charts render fully before taking a screenshot
+        path = f"screenshot_{i}.png"
+        driver.save_screenshot(path)  # Capture screenshot and save it
+        paths.append(path)
+        print(f"✅ saved {path}")
+    
+    save_cookies(driver)  # Save cookies for future use
+    driver.quit()  # Close the browser
+    return paths
 
-    save_cookies(driver)
-    driver.quit()
-    return screenshot_paths
 
-def send_email(screenshot_paths):
-    smtp_server = "smtp.gmail.com"
-    smtp_port = 587
-    import os
-    smtp_username = os.getenv("SMTP_USERNAME")
-    smtp_password = os.getenv("SMTP_PASSWORD")
+def send_mail(paths):
+    """
+    Sends an email with the screenshots as attachments.
+    """
+    smtp_user = os.getenv("SMTP_USERNAME")  # Fetch SMTP username from environment variables
+    smtp_pass = os.getenv("SMTP_PASSWORD")  # Fetch SMTP password from environment variables
+    recips = ["niha.singhania@flipkart.com", "sujeeth.b@flipkart.com", "gaddam.govardhan@flipkart.com"]  # List of recipients
 
-    recipient_email = "niha.singhania@flipkart.com",
+    # Get the current time in IST timezone for email subject
+    ist_now = datetime.datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(pytz.timezone("Asia/Kolkata"))
+    subject = f"📊 OB Summary Report – {ist_now:%Y-%m-%d %H:%M IST}"
 
-    utc_now = datetime.datetime.utcnow()
-    ist = pytz.timezone("Asia/Kolkata")
-    current_time = utc_now.replace(tzinfo=pytz.utc).astimezone(ist).strftime("%Y-%m-%d %H:%M:%S")
+    # Create the email message with subject, body, and recipients
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = smtp_user
+    msg["To"] = ", ".join(recips)
+    msg.set_content("Attached: latest PAN‑India summary screenshots.\n— Onboarding Bot")
 
+    # Attach screenshots to the email
+    for p in paths:
+        with open(p, "rb") as f:
+            msg.add_attachment(f.read(), maintype="image", subtype="png", filename=p)
+
+    # Send the email using Gmail's SMTP server
+    with smtplib.SMTP("smtp.gmail.com", 587) as s:
+        s.starttls()  # Upgrade the connection to a secure encrypted SSL/TLS connection
+        s.login(smtp_user, smtp_pass)  # Log in to the SMTP server
+        s.send_message(msg)  # Send the email
+    print("📧 mail sent")
+
+
+if __name__ == "__main__":
+    """
+    Main function to capture screenshots and send the email.
+    If any error occurs, it prints the stack trace and surfaces the error to GitHub Actions.
+    """
     try:
-        msg = EmailMessage()
-        msg["Subject"] = f"📊 OB Summary Report for Trueflex & Vendors - {current_time} IST"
-        msg["From"] = smtp_username
-        msg["To"] = recipient_email
-        msg.set_content("""
-Dear Team,
-Please find below the latest PAN India Summary Reports for both dashboards.
-
-Regards,
-Onboarding Team
-        """)
-
-        for i, screenshot_path in enumerate(screenshot_paths):
-            with open(screenshot_path, "rb") as f:
-                msg.add_attachment(f.read(), maintype="image", subtype="png", filename=f"dashboard_screenshot_{i+1}.png")
-
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_username, smtp_password)
-            server.send_message(msg)
-
-        print("✅ Email sent successfully!")
-    except Exception as e:
-        print(f"❌ Error sending email: {e}")
-        traceback.print_exc()
-
-def run_periodic_task():
-    while True:
-        print("🚀 Running Looker Studio Screenshot Task...")
-        screenshot_paths = capture_screenshots()
-        if screenshot_paths:
-            send_email(screenshot_paths)
-        else:
-            print("❌ Screenshot failed. Skipping email.")
-        print("⏳ Waiting 1 hour...")
-        time.sleep(3600)
-
-run_periodic_task()
+        screenshots = capture()  # Capture screenshots
+        send_mail(screenshots)  # Send email with screenshots
+    except Exception:
+        traceback.print_exc()  # Print error stack trace
+        raise  # Reraise the error to GitHub Actions
