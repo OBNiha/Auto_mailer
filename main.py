@@ -1,127 +1,124 @@
+#!/usr/bin/env python3
 """
-main.py – grab two Looker Studio pages, e‑mail screenshots, exit.
-Runs inside GitHub Actions; Chrome + chromedriver are pre‑installed.
+Take two Looker Studio screenshots with headless Chrome,
+e‑mail them via Gmail API using a GCP service‑account,
+then exit (for GitHub Actions).
 """
 
-import time
-import datetime
-import pytz
-import pickle
-import traceback
-import os
+import os, time, datetime, pickle, base64, traceback
 from email.message import EmailMessage
-import smtplib
+
+import pytz
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 
-# List of Looker Studio pages to capture screenshots from
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
+
+# ── CONFIG ──────────────────────────────────────────────────────────────────── #
+
 LOOKER_PAGES = [
-    "https://lookerstudio.google.com/reporting/bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_fsj6ky8zqd",
-    "https://lookerstudio.google.com/reporting/bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_c7fyt0w5qd",
+    "https://lookerstudio.google.com/reporting/"
+    "bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_fsj6ky8zqd",
+    "https://lookerstudio.google.com/reporting/"
+    "bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_c7fyt0w5qd",
 ]
+RECIPIENTS = "niha.singhania@flipkart.com"
+SENDER = "niha.singhania@flipkart.com" # Workspace mailbox you’ll send as
+SA_FILE = "sa.json" # Written by the workflow step
+COOKIE_FILE = "cookies.pkl" # Re‑used between runs
+TIMEZONE = pytz.timezone("Asia/Kolkata")
 
-# File to store cookies for session management
-COOKIE_FILE = "cookies.pkl"
-
+# ── BROWSER HELPERS ─────────────────────────────────────────────────────────── #
 
 def get_driver() -> webdriver.Chrome:
-    """
-    Initializes and returns a headless Chrome WebDriver with the necessary options.
-    """
     opts = Options()
-    opts.add_argument("--headless=new")  # Run headless (no UI)
-    opts.add_argument("--no-sandbox")    # Disables the sandbox for the Chromium process
-    opts.add_argument("--disable-dev-shm-usage")  # Avoids limited memory usage errors
-    opts.add_argument("--window-size=1920,1080")  # Sets window size to capture full page
+    opts.add_argument("--headless=new")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--window-size=1920,1080")
     return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=opts)
 
 
-def load_cookies(driver, url):
-    """
-    Loads cookies from a pickle file to maintain session across script runs.
-    If cookies are not found, it will print a message and let the user log in manually.
-    """
-    try:
-        with open(COOKIE_FILE, "rb") as f:
-            cookies = pickle.load(f)
-        driver.get(url)
-        time.sleep(5)  # Allow time for the page to load
-        for c in cookies:
-            driver.add_cookie(c)
-        driver.refresh()
-    except FileNotFoundError:
-        print("No cookies.pkl – first run will require manual login and saving.")
+def load_cookies(driver, url: str):
+    if not os.path.exists(COOKIE_FILE):
+        return
+    with open(COOKIE_FILE, "rb") as f:
+        cookies = pickle.load(f)
+    driver.get(url)
+    time.sleep(5)
+    for c in cookies:
+        driver.add_cookie(c)
+    driver.refresh()
 
 
 def save_cookies(driver):
-    """
-    Saves the current cookies to a file for future session use.
-    """
     with open(COOKIE_FILE, "wb") as f:
         pickle.dump(driver.get_cookies(), f)
 
+# ── CORE FUNCTIONS ─────────────────────────────────────────────────────────── #
 
-def capture():
-    """
-    Captures screenshots of the Looker Studio pages and returns a list of file paths.
-    """
-    driver = get_driver()  # Initialize the WebDriver
+def capture_screens() -> list[str]:
+    driver = get_driver()
     paths = []
     for i, url in enumerate(LOOKER_PAGES, 1):
-        load_cookies(driver, url)  # Load cookies for maintaining session
-        print(f"⏳ loading {url}")
-        time.sleep(25)  # Let charts render fully before taking a screenshot
+        load_cookies(driver, url)
+        print(f"⏳ Loading {url}")
+        time.sleep(25) # allow charts to render
         path = f"screenshot_{i}.png"
-        driver.save_screenshot(path)  # Capture screenshot and save it
+        driver.save_screenshot(path)
+        print(f"✅ Saved {path}")
         paths.append(path)
-        print(f"✅ saved {path}")
-    
-    save_cookies(driver)  # Save cookies for future use
-    driver.quit()  # Close the browser
+    save_cookies(driver)
+    driver.quit()
     return paths
 
 
-def send_mail(paths):
-    """
-    Sends an email with the screenshots as attachments.
-    """
-    smtp_user = os.getenv("SMTP_USERNAME")  # Fetch SMTP username from environment variables
-    smtp_pass = os.getenv("SMTP_PASSWORD")  # Fetch SMTP password from environment variables
-    recips = ["niha.singhania@flipkart.com", "sujeeth.b@flipkart.com", "gaddam.govardhan@flipkart.com"]  # List of recipients
+def gmail_service() -> build:
+    creds = (
+        service_account.Credentials.from_service_account_file(
+            SA_FILE,
+            scopes=["https://www.googleapis.com/auth/gmail.send"],
+        )
+        .with_subject(SENDER)
+    )
+    return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
-    # Get the current time in IST timezone for email subject
-    ist_now = datetime.datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(pytz.timezone("Asia/Kolkata"))
+
+def send_mail(paths: list[str]):
+    ist_now = datetime.datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(TIMEZONE)
     subject = f"📊 OB Summary Report – {ist_now:%Y-%m-%d %H:%M IST}"
 
-    # Create the email message with subject, body, and recipients
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = smtp_user
-    msg["To"] = ", ".join(recips)
-    msg.set_content("Attached: latest PAN‑India summary screenshots.\n— Onboarding Bot")
+    msg["From"] = SENDER
+    msg["To"] = ", ".join(RECIPIENTS)
+    msg.set_content(
+        "Hi team,\n\nPlease find the latest PAN‑India summary screenshots attached.\n\n— Onboarding Bot"
+    )
 
-    # Attach screenshots to the email
     for p in paths:
         with open(p, "rb") as f:
-            msg.add_attachment(f.read(), maintype="image", subtype="png", filename=p)
+            msg.add_attachment(
+                f.read(),
+                maintype="image",
+                subtype="png",
+                filename=os.path.basename(p),
+            )
 
-    # Send the email using Gmail's SMTP server
-    with smtplib.SMTP("smtp.gmail.com", 587) as s:
-        s.starttls()  # Upgrade the connection to a secure encrypted SSL/TLS connection
-        s.login(smtp_user, smtp_pass)  # Log in to the SMTP server
-        s.send_message(msg)  # Send the email
-    print("📧 mail sent")
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    gmail_service().users().messages().send(userId="me", body={"raw": raw}).execute()
+    print("📧 Mail sent via Gmail API")
 
+
+# ── MAIN ───────────────────────────────────────────────────────────────────── #
 
 if __name__ == "__main__":
-    """
-    Main function to capture screenshots and send the email.
-    If any error occurs, it prints the stack trace and surfaces the error to GitHub Actions.
-    """
     try:
-        screenshots = capture()  # Capture screenshots
-        send_mail(screenshots)  # Send email with screenshots
+        imgs = capture_screens()
+        send_mail(imgs)
     except Exception:
-        traceback.print_exc()  # Print error stack trace
-        raise  # Reraise the error to GitHub Actions
+        traceback.print_exc()
+        raise
