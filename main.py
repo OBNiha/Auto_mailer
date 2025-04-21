@@ -93,7 +93,7 @@ def send_email(screenshot_paths):
     smtp_username = os.getenv("SMTP_USERNAME")
     smtp_password = os.getenv("SMTP_PASSWORD")
 
-    recipient_email = ["niha.singhania@flipkart.com","sujeeth.b@flipkart.com","gaddam.govardhan@flipkart.com"]
+    recipient_email = "niha.singhania@flipkart.com",
 
     utc_now = datetime.datetime.utcnow()
     ist = pytz.timezone("Asia/Kolkata")
