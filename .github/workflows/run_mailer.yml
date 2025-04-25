@@ -1,44 +1,36 @@
-name: Daily OB Summary Email
+name: OB screenshots + mailer (hourly IST)
 
 on:
+  # Trigger every hour from 09:00‒21:00 IST → 03:30‒15:30 UTC
   schedule:
-    - cron: '45 0 * * *' # Runs daily at 05:15 AM IST (UTC+5:30)
-  workflow_dispatch: # Allows manual run from GitHub UI
+    - cron: '30 3-15 * * *'  # Executes at 30 minutes past the hour, every hour between 03:30 and 15:30 UTC
+  workflow_dispatch:  # Allows manual trigger of the workflow
 
 jobs:
-  run-screenshot-mailer:
-    runs-on: ubuntu-latest
+  mailer:
+    runs-on: ubuntu-latest  # Specifies the environment for the job
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      # Checkout the repository to get access to the code
+      - uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      # Set up Python environment (version 3.10)
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install Chrome and Chromedriver
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget unzip
-          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -f install -y
-          CHROME_VERSION=$(google-chrome --version | grep -oP "\d+\.\d+\.\d+")
-          CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE")
-          wget https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip
-          unzip chromedriver_linux64.zip
-          sudo mv chromedriver /usr/bin/chromedriver
-          sudo chmod +x /usr/bin/chromedriver
+      # Install headless Chrome and chromedriver for automation
+      - uses: browser-actions/setup-chrome@v1
 
-      - name: Install dependencies
+      # Install the required Python dependencies from requirements.txt
+      - name: Install Python deps
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run screenshot mailer script
-        run: python main.py
-
+      # Run the main script to capture screenshots and send email
+      - name: Run script
         env:
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}  # Set SMTP user from GitHub secrets
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}  # Set SMTP password from GitHub secrets
+        run: python main.py  # Execute the Python script
