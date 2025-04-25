@@ -48,7 +48,7 @@ def get_driver() -> uc.Chrome:
 # ──────────────────────────────────────────────────────────── #
 # Screen-capture with *active* waits
 # ──────────────────────────────────────────────────────────── #
-def capture_screens(max_wait_outer=60, max_wait_inner=60) -> list[str]:
+def capture_screens(max_wait_outer=60, max_wait_inner=180) -> list[str]:
     """
     • Waits up to `max_wait_outer` s for the <iframe> container.
     • Then switches *into* the iframe and waits up to `max_wait_inner` s
