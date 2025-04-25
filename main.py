@@ -45,8 +45,8 @@ def capture_screens():
     return paths
 
 def send_mail(paths):
-    smtp_username = "niha.singhania@flipkart.com"
-    smtp_password = "vadk lmsp zfpw zxab"
+    smtp_user = os.getenv("EMAIL_ID")
+    smtp_pass = os.getenv("EMAIL_PASS")
 
     if not smtp_user or not smtp_pass:
         raise Exception("EMAIL_ID or EMAIL_PASS environment variables not set.")
