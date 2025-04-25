@@ -1,42 +1,39 @@
-"""Auto-grab public Looker-Studio dashboards and e-mail them.
-▸ Share each report ► Manage access ► Anyone on the internet – Viewer
-▸ Copy the *embed* link(s) into LOOKER_PAGES below
-"""
+"""Grabs public Looker-Studio dashboards (cross-origin safe) and e-mails them
+hourly. Works inside GitHub Actions with headless Chrome “stable”."""
 
 import os
+import time
 import traceback
 import datetime as dt
 from email.message import EmailMessage
 from smtplib import SMTP
+
 import pytz
 import undetected_chromedriver as uc
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# ──────────────────────────────────────────────────────────── #
-# EMBED LINKS
-# ──────────────────────────────────────────────────────────── #
+# ────────────────────────────────  USER CONFIG  ───────────────────────────────
+
 LOOKER_PAGES = [
     "https://lookerstudio.google.com/embed/reporting/bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_fsj6ky8zqd",
     "https://lookerstudio.google.com/embed/reporting/bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_mv9sot1urd",
 ]
 
-# List of email recipients
-RECIPIENTS = ["niha.singhania@flipkart.com"]
+RECIPIENTS = ["niha.singhania@flipkart.com"]  # Email recipients
 
-# Timezone setup
-TZ_IST = pytz.timezone("Asia/Kolkata")
+LOAD_GRACE_SECONDS = 70                        # Wait this long after iframe loads
+TZ_IST = pytz.timezone("Asia/Kolkata")         # Indian timezone
 
-# SMTP credentials pulled from environment variables
-SMTP_USER = os.getenv("SMTP_USER")
-SMTP_PASS = os.getenv("SMTP_PASS")
+SMTP_USER = os.getenv("SMTP_USER")             # From environment variable
+SMTP_PASS = os.getenv("SMTP_PASS")             # From environment variable
 
-# ──────────────────────────────────────────────────────────── #
-# Chrome helper
-# ──────────────────────────────────────────────────────────── #
+# ────────────────────────────────  BROWSER SETUP  ──────────────────────────────
+
 def get_driver() -> uc.Chrome:
-    # Configure and return a headless undetected Chrome driver instance
+    """Initialize headless Chrome with required flags."""
     opts = uc.ChromeOptions()
     opts.add_argument("--headless=new")
     opts.add_argument("--window-size=1920,1080")
@@ -45,62 +42,50 @@ def get_driver() -> uc.Chrome:
     opts.add_argument("--disable-blink-features=AutomationControlled")
     return uc.Chrome(options=opts)
 
-# ──────────────────────────────────────────────────────────── #
-# Screen-capture with *active* waits
-# ──────────────────────────────────────────────────────────── #
-def capture_screens(max_wait_outer=60, max_wait_inner=180) -> list[str]:
-    """
-    • Waits up to `max_wait_outer` s for the <iframe> container.
-    • Then switches *into* the iframe and waits up to `max_wait_inner` s
-      for a chart element (<canvas>, <svg>, or <img>).
-    """
+# ────────────────────────────────  SCREENSHOTS  ────────────────────────────────
+
+def capture_screens() -> list[str]:
+    """Capture screenshots of Looker Studio dashboards."""
     driver = get_driver()
     shots: list[str] = []
 
     for idx, url in enumerate(LOOKER_PAGES, 1):
-        print(f" Opening {url}")
+        print(f"   Opening {url}")
         driver.get(url)
 
-        # Wait for iframe to load
-        iframe = WebDriverWait(driver, max_wait_outer).until(
-            EC.presence_of_element_located((By.TAG_NAME, "iframe"))
-        )
-        print(" iframe found")
-
-        # Switch to iframe and wait for charts/images to appear
-        driver.switch_to.frame(iframe)
-        WebDriverWait(driver, max_wait_inner).until(
-            EC.any_of(
-                EC.presence_of_element_located((By.TAG_NAME, "canvas")),
-                EC.presence_of_element_located((By.TAG_NAME, "svg")),
-                EC.presence_of_element_located((By.TAG_NAME, "img")),
+        try:
+            # Wait up to 60 seconds for the iframe to appear
+            WebDriverWait(driver, 60).until(
+                EC.presence_of_element_located((By.TAG_NAME, "iframe"))
             )
-        )
-        print(" chart(s) detected — ready to shoot")
+            print(f"   iframe found — sleeping {LOAD_GRACE_SECONDS}s for charts to render …")
+        except TimeoutException:
+            print("   iframe never appeared – taking blank shot for inspection")
 
-        # Capture screenshot from top-level context
-        driver.switch_to.default_content()
+        # Wait for charts to render after iframe loads
+        time.sleep(LOAD_GRACE_SECONDS)
+
+        # Save screenshot
         fname = f"screenshot_{idx}.png"
         driver.save_screenshot(fname)
-        print(f" Saved {fname}")
+        print(f"   Saved {fname}")
         shots.append(fname)
 
     driver.quit()
     return shots
 
-# ──────────────────────────────────────────────────────────── #
-# Mail helper
-# ──────────────────────────────────────────────────────────── #
+# ────────────────────────────────  EMAIL SENDER  ───────────────────────────────
+
 def send_mail(images: list[str]) -> None:
-    # Ensure SMTP credentials are present
+    """Send screenshots via email."""
     if not SMTP_USER or not SMTP_PASS:
         raise RuntimeError("SMTP_USER / SMTP_PASS env vars missing")
 
-    # Format subject with current IST timestamp
+    # Timestamp in IST
     ist_now = dt.datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(TZ_IST)
     subject = f" OB Summary – {ist_now:%d %b %Y %I:%M %p IST}"
 
-    # Compose email
+    # Email message setup
     msg = EmailMessage()
     msg["From"] = SMTP_USER
     msg["To"] = ", ".join(RECIPIENTS)
@@ -109,30 +94,30 @@ def send_mail(images: list[str]) -> None:
         "Hi team,\n\nAttached are the latest PAN-India summary screenshots.\n\n— Onboarding Bot"
     )
 
-    # Attach screenshots to the email
-    for path in images:
-        with open(path, "rb") as f:
+    # Attach screenshots
+    for p in images:
+        with open(p, "rb") as f:
             msg.add_attachment(
                 f.read(),
                 maintype="image",
                 subtype="png",
-                filename=os.path.basename(path)
+                filename=os.path.basename(p)
             )
 
-    # Send the email using Gmail SMTP
+    # Send email via SMTP (Gmail)
     with SMTP("smtp.gmail.com", 587) as s:
         s.starttls()
         s.login(SMTP_USER, SMTP_PASS)
         s.send_message(msg)
-    print(" Mail sent!")
 
-# ──────────────────────────────────────────────────────────── #
-# Main
-# ──────────────────────────────────────────────────────────── #
+    print("   Mail sent!")
+
+# ────────────────────────────────  MAIN ENTRY POINT  ───────────────────────────
+
 if __name__ == "__main__":
     try:
-        imgs = capture_screens()
-        send_mail(imgs)
-    except Exception as exc:
-        print(" Script failed:", exc)
+        screenshots = capture_screens()
+        send_mail(screenshots)
+    except Exception as e:
+        print("   Script failed:", e)
         traceback.print_exc()
