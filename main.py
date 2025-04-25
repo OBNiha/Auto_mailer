@@ -45,8 +45,8 @@ def capture_screens():
     return paths
 
 def send_mail(paths):
-    smtp_user = os.environ.get("EMAIL_ID")       # Must be set as GitHub Secret or env var
-    smtp_pass = os.environ.get("EMAIL_PASS")     # Must be set as GitHub Secret or env var
+    smtp_username = "niha.singhania@flipkart.com"
+    smtp_password = "vadk lmsp zfpw zxab"
 
     if not smtp_user or not smtp_pass:
         raise Exception("EMAIL_ID or EMAIL_PASS environment variables not set.")
