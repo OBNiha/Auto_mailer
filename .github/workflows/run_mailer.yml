@@ -3,7 +3,7 @@ name: OB screenshots + mailer (hourly IST)
 on:
   # Trigger every hour from 09:00‒21:00 IST → 03:30‒15:30 UTC
   schedule:
-    - cron: '30 3-15 * * *'  # Executes at 30 minutes past the hour, every hour between 03:30 and 15:30 UTC
+    - cron: '0 3-15 * * *'  # Executes at 30 minutes past the hour, every hour between 03:30 and 15:30 UTC
   workflow_dispatch:  # Allows manual trigger of the workflow
 
 jobs:
