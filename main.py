@@ -22,7 +22,7 @@ LOOKER_PAGES = [
     "https://lookerstudio.google.com/embed/reporting/bf8f0517-e040-42c3-a6a9-e9d0b62885df/page/p_mv9sot1urd",
 ]
 
-RECIPIENTS = ["niha.singhania@flipkart.com", "sujeeth.b@flipkart.com","gaddam.govardhan@flipkart.com"]  # Email recipients
+RECIPIENTS = ["niha.singhania@flipkart.com", "sujeeth.b@flipkart.com"]  # Email recipients
 
 LOAD_GRACE_SECONDS = 70                        # Wait this long after iframe loads
 TZ_IST = pytz.timezone("Asia/Kolkata")         # Indian timezone
